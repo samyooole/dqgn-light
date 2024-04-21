@@ -3,18 +3,21 @@ from torch import Tensor
 from typing import Optional
 import networkx as nx
 import numpy as np
+
+import torch.nn.functional as F
 import queue
 from itertools import chain
 
 
 class GridEnvironment():
-    def __init__(self, grid_height, grid_width, timestep_limit, lane_cap, no_cars):
+    def __init__(self, grid_height, grid_width, timestep_limit, lane_cap, no_cars, total_timesteps=100):
 
         self.grid_height = grid_height
         self.grid_width = grid_width
         self.timestep_limit = timestep_limit
         self.lane_cap = lane_cap
         self.spawn_grid()
+        self.no_cars=no_cars
         # Convert edge index tensor to edge list
         edges = self.edge_index.numpy().T.tolist()
 
@@ -22,6 +25,7 @@ class GridEnvironment():
         self.G = nx.DiGraph()
         self.G.add_edges_from(edges)
         self.spawn_journies(no_cars) # also gives the initial state
+        self.total_timesteps=total_timesteps
 
 
     def car(self, source, sink):
@@ -199,8 +203,14 @@ class GridEnvironment():
 
                 lopil.append(phase_inline)
             lol.append(lopil)
-        x_list = [torch.tensor(phases, dtype=torch.float32) for phases in lol]
-        return x_list
+        
+        max_features = max(self.num_nodes_phases)
+
+        padded_tensors = [torch.tensor(sublist + [0]*(max_features - len(sublist)),dtype=torch.float) for sublist in lol]
+
+        # Concatenate the padded tensors into a single tensor
+        full_tensor = torch.stack(padded_tensors, dim=0)
+        return full_tensor
     
 
 def grid_pos( # this goes with the above class

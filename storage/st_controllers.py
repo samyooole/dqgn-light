@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GraphConv 
+from torch_geometric.nn import GCNConv
 from queue import Queue
 import random
 from itertools import chain
 
 import torch.optim as optim
 import numpy as np
-from collections import deque
 
 class FixedTime():
     def __init__(self, gridenvironment, num_nodes_phases):
@@ -100,9 +99,9 @@ class QNetwork(nn.Module):
         x = self.mid_conv1(x, edge_index)
         x=x.relu()
         x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
-        #x = self.mid_conv2(x, edge_index)
-        #x=x.relu()
-        #x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
+        x = self.mid_conv2(x, edge_index)
+        x=x.relu()
+        x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
         
         
         # Compute Q-values
@@ -129,7 +128,7 @@ class dqgnLight(nn.Module):
         self.target_q_network.load_state_dict(self.q_network.state_dict())
 
         # Create experience replay buffer: just a list
-        self.erBuffer = deque(maxlen=5000)
+        self.erBuffer = []
 
         # Initialize dqn parameters
         self.batch_size = batch_size
@@ -180,11 +179,9 @@ class dqgnLight(nn.Module):
             after_pressure = self.current_pressure()
 
             reward = -(np.array(after_pressure) - np.array(before_pressure))
-            
+            reward = reward.reshape(reward.shape[0])
             
             #reward = -(np.array(after_pressure)) # just the reward being the pressure period, not the change
-
-            reward = reward.reshape(reward.shape[0])
 
             next_state = self.current_pressure()
             terminal = self.timestep == self.genv.total_timesteps - 2 #?
@@ -249,7 +246,8 @@ class dqgnLight(nn.Module):
         # reset at the start of every workout session
         self.epoch = 0
         self.timestep = 0
-        
+        self.erBuffer = [] # must reset experience replay buffer too
+
         iteration_steps = self.genv.total_timesteps
 
         while self.timestep < iteration_steps - 1:
@@ -295,6 +293,7 @@ class dqgnLight(nn.Module):
         
         filtered_list = [tup for sublist in this_int for tup in sublist if tup[0] == from_intersection]
         return filtered_list
+
 
 
 

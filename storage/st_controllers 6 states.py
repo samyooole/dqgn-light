@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, GraphConv 
+from torch_geometric.nn import GCNConv, GraphConv
 from queue import Queue
 import random
 from itertools import chain
 
 import torch.optim as optim
 import numpy as np
-from collections import deque
 
 class FixedTime():
     def __init__(self, gridenvironment, num_nodes_phases):
@@ -86,9 +85,9 @@ class QNetwork(nn.Module):
         max_features = max(num_nodes_phases)
         
         # GCN layers
-        self.conv = GCNConv(1, hidden_dim)
-        self.mid_conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.mid_conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.conv = GraphConv(input_size, hidden_dim)
+        self.mid_conv1 = GraphConv(hidden_dim, hidden_dim)
+        self.mid_conv2 = GraphConv(hidden_dim, hidden_dim)
         
         # Linear layers for Q-values
         self.q_value_layers = nn.ModuleList([nn.Linear(hidden_dim, n) for n in num_nodes_phases])
@@ -100,10 +99,9 @@ class QNetwork(nn.Module):
         x = self.mid_conv1(x, edge_index)
         x=x.relu()
         x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
-        #x = self.mid_conv2(x, edge_index)
-        #x=x.relu()
-        #x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
-        
+        x = self.mid_conv2(x, edge_index)
+        x=x.relu()
+        x=F.dropout(x, p=0.5, training=True)# change this later when doing the normal implementation
         
         # Compute Q-values
         q_values = [layer(xi) for xi, layer in zip(x, self.q_value_layers)]
@@ -129,7 +127,7 @@ class dqgnLight(nn.Module):
         self.target_q_network.load_state_dict(self.q_network.state_dict())
 
         # Create experience replay buffer: just a list
-        self.erBuffer = deque(maxlen=5000)
+        self.erBuffer = []
 
         # Initialize dqn parameters
         self.batch_size = batch_size
@@ -166,14 +164,14 @@ class dqgnLight(nn.Module):
             else:
                 # get action with the largest value
                 with torch.no_grad():
-                    this_state = self.current_pressure()
+                    this_state = self.genv.get_numeric_state()
                     q_values = self.forward(this_state, self.genv.edge_index)
                     action = [torch.argmax(q).item() for q in q_values]
 
             # execute chosen action (set of traffic light green phases)
 
             # grab state before doing anything
-            before_state = self.current_pressure()
+            before_state = self.genv.get_numeric_state()
             # calculate reward separately as difference? in pressure 
             before_pressure = self.current_pressure()
             self.genv.dynamics(action) # this edits the characteristics of self.genv directly, so we can access whatever we need from here
@@ -181,27 +179,15 @@ class dqgnLight(nn.Module):
 
             reward = -(np.array(after_pressure) - np.array(before_pressure))
             
-            
             #reward = -(np.array(after_pressure)) # just the reward being the pressure period, not the change
 
-            reward = reward.reshape(reward.shape[0])
-
-            next_state = self.current_pressure()
+            next_state = self.genv.get_numeric_state()
             terminal = self.timestep == self.genv.total_timesteps - 2 #?
 
             add_to_buffer = {'state': before_state, 'action': action, 'reward': reward, 'next_state': next_state, 'terminal':terminal}
             # store in replay buffer
             self.erBuffer.append(add_to_buffer)
             self.timestep+=1
-        
-        
-        # Every update_interval, set target network's parameters to Q network's parameters
-        time_to_update = (self.epoch % self.update_interval == 0)
-
-        if time_to_update:
-            self.target_q_network.load_state_dict(self.q_network.state_dict())
-        
-        
         self.epoch+=1
 
     
@@ -241,7 +227,11 @@ class dqgnLight(nn.Module):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-       
+        # Every update_interval, set target network's parameters to Q network's parameters
+        time_to_update = (self.epoch % self.update_interval == 0)
+
+        if time_to_update:
+            self.target_q_network.load_state_dict(self.q_network.state_dict())
 
     def workout(self):
         self.genv.spawn_journies(self.genv.no_cars)
@@ -249,7 +239,8 @@ class dqgnLight(nn.Module):
         # reset at the start of every workout session
         self.epoch = 0
         self.timestep = 0
-        
+        self.erBuffer = [] # must reset experience replay buffer too
+
         iteration_steps = self.genv.total_timesteps
 
         while self.timestep < iteration_steps - 1:
@@ -273,7 +264,7 @@ class dqgnLight(nn.Module):
                     tl_pressure+=inward_pressure
                 
             # calculate outpressure for each traffic light by itself, otherwise we will double count
-            """
+            
             adjacent_tls = self.genv.edge_index[:, self.genv.edge_index[0] == tl_id][1]
             outward_lanes = [self.mine_for_number_in_phases_list(of_intersection=adjacent_tl, from_intersection=tl_id) for adjacent_tl in adjacent_tls]
 
@@ -285,16 +276,16 @@ class dqgnLight(nn.Module):
                 outward_pressure += self.genv.state[lane].qsize()
 
             tl_pressure-=outward_pressure
-            """
-            tl_pressure_list.append(tl_pressure)
             
-        return torch.tensor(tl_pressure_list, dtype=torch.float).unsqueeze(1)
+            tl_pressure_list.append(tl_pressure)
+        return tl_pressure_list
 
     def mine_for_number_in_phases_list(self, of_intersection, from_intersection):
         this_int = self.genv.phases_list[of_intersection]
         
         filtered_list = [tup for sublist in this_int for tup in sublist if tup[0] == from_intersection]
         return filtered_list
+
 
 
 

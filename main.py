@@ -1,22 +1,43 @@
 from GridEnvironment import GridEnvironment
 from controllers import FixedTime, MaxPressure,dqgnLight
 
+# seal this up!!
+genv = GridEnvironment(3, 3, 2, 5, no_cars=500, total_timesteps=200)
+# this works kinda nice
+controller = dqgnLight(
+    gridenvironment = genv,
+    num_nodes_phases = genv.num_nodes_phases, 
+    hidden_dim= 100, 
+    batch_size = 20, 
+    learning_rate = 1e-9,  # maybe it's the learning rate after all?
+    gamma=0.9, 
+    epsilon=0.9, 
+    epsilon_min=0.1, 
+    epsilon_decay=0.9, 
+    training_interval= 30, 
+    update_interval=60
+)
 
-genv = GridEnvironment(3, 3, 2, 5, no_cars=200)
-controller = dqgnLight(genv.num_nodes_phases, 100, 5)
+
+controller.gymroutine(episodes=10)
+
+mrw = list(controller.erBuffer)[-199:]
+
+
+genv = GridEnvironment(3, 3, 2, 5, no_cars=500)
+controller = FixedTime(genv, genv.num_nodes_phases)
+controller.act()
+controller.genv.get_numeric_state()
+lala+=1
+
+
+####
 
 controller.forward(genv.get_numeric_state(), genv.edge_index)
 
 controller.genv.peek_state()
 controller.act()
 controller.genv.peek_state()
-
-
-
-
-
-
-
 
 
 
